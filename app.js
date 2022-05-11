@@ -173,7 +173,7 @@ app.get('/getReceptById', async (req, res) => {
 app.put('/updateRecept', async (req, res) => {
     let {id, name, contentText, base64Image, fileName} = req.body;
     
-    if(!deleteFile(fileName)){
+    if(base64Image && !deleteFile(fileName)){
         return res.json('shit happend again.')
     }
     
