@@ -1,10 +1,12 @@
 const express = require('express');
 const app = express();
 const bodyParser = require('body-parser');
+const cors = require('cors');
 var aws = require('aws-sdk');
 
 // configs
-app.use(bodyParser.json())
+app.use(bodyParser.json({limit: '50mb'}))
+app.use(cors())
 const _AWS_PATH = 'images/'
 const _PORT = 8000;
 
@@ -21,6 +23,8 @@ const uploadFile = (imageBuffer, filePath) => {
       const bucketName = "howgut";
       let bucketPath = filePath;
   
+      console.log(bucketPath);
+
       let params = {
         Bucket: bucketName,
         Key: bucketPath,
@@ -75,16 +79,6 @@ const deleteFile = async (fileName) => {
     }
     await s3.deleteObject(params).promise()
 }
-// const base64ToBuffer = (base64) => {
-//       var binary_string = Buffer.from(base64, 'base64');
-//       var len = binary_string.length;
-//       var bytes = new Uint8Array(len);
-//       for (var i = 0; i < len; i++) {
-//           bytes[i] = binary_string.charCodeAt(i);
-//       }
-//       return bytes.buffer;
-// }
-
 
 // models
 const Users = require('./Models/Users');
@@ -93,31 +87,6 @@ const Sequelize = require('sequelize');
 
 
 app.post('/authenticate', async (req, res) => {
-    
-    // var buffer = base64ToBuffer(base64String)
-    // await uploadFile(buffer, `${filename}-${Date.now()}${extention}`);
-
-    // getFile('namespace.png')
-    //     .then(data => {
-    //         console.log(data);
-    //     })
-    //     .catch(err => {
-    //         console.log(err);
-    //     })
-
-    // deleteFile('namespace.png')
-    //     .then(data => {
-    //         console.log("Deleted");
-    //     })
-    //     .catch(err =>{
-    //         console.log('shit happens');
-    //     })
-
-    // s3Client.deleteFile('Untitled2.png')
-    //     .then(response => console.log(response))
-    //     .catch(err => console.error(err))
-
-
     const {username, password} = req.body.authentication;
     Users.findOne({
         where: {
@@ -139,7 +108,8 @@ app.post('/authenticate', async (req, res) => {
 })
 
 app.post('/createRecept', async (req, res) => {
-    let {name, contentText, base64Image, fileName, uploadedBy} = req.body;
+    let {name, contentText, base64Image, fileName} = req.body;
+    let {idtoken} = req.headers;
 
     base64ImageInfo = base64Image.split(',')[0];
     base64Image = base64Image.split(',')[1];
@@ -161,7 +131,7 @@ app.post('/createRecept', async (req, res) => {
         ContentText: contentText,
         ImageBase64Info: base64ImageInfo + ',',
         ImageUrl: filePath,
-        UploadedBy: 1
+        UploadedBy: idtoken.split('_')[1]
     })
         .then(data => {
             res.json({responseStatus: 200, content: data})
@@ -171,9 +141,20 @@ app.post('/createRecept', async (req, res) => {
             console.log(err);
         })
 })
+app.get('/getRecepts', async (req, res) => {
+    const {idtoken} = req.headers;
+    Recipes.findAll({
+        where: {
+            UploadedBy: idtoken.split('_')[1]
+        }
+    }).then(data => {
+        res.json(data)
+    }).catch(err => {
+        console.log(err)
+    });
+});
 app.get('/getReceptById', async (req, res) => {
     const {id} = req.query;
-    console.log(id);
     Recipes.findOne({
         where: {
             Id: id,
@@ -181,9 +162,7 @@ app.get('/getReceptById', async (req, res) => {
         }
     })
         .then(async (data) => {
-            console.log('we are here');
             let image = data.dataValues.ImageBase64Info + await getFile(data.dataValues.ImageUrl);
-            console.log('but i guess not here...');
             data.dataValues.base64Image = image;
             res.json(data);
         })
@@ -192,32 +171,26 @@ app.get('/getReceptById', async (req, res) => {
         })
 })
 app.put('/updateRecept', async (req, res) => {
-    let {id, name, contentText, base64Image, fileName, uploadedBy} = req.body;
+    let {id, name, contentText, base64Image, fileName} = req.body;
+    
     if(!deleteFile(fileName)){
         return res.json('shit happend again.')
     }
     
-    base64ImageInfo = base64Image.split(',')[0];
-    base64Image = base64Image.split(',')[1];
-    var fileNameIndex = fileName.lastIndexOf('.');
-    realFileName = fileName.substring(0, fileNameIndex);
-    extention = fileName.substring(fileNameIndex);
-    var filePath = `${_AWS_PATH}${realFileName}-${Date.now()}${extention}`;
-    var fileUploaded = await uploadFile(Buffer.from(base64Image, 'base64'), filePath);
-
-    if (fileUploaded) {
-        console.log(filePath);
-    }
-    else{
-        return console.log("Shit happens");
+    if (base64Image) {
+        base64ImageInfo = base64Image.split(',')[0];
+        base64Image = base64Image.split(',')[1];
+        var fileNameIndex = fileName.lastIndexOf('.');
+        realFileName = fileName.substring(0, fileNameIndex);
+        extention = fileName.substring(fileNameIndex);
+        var filePath = `${_AWS_PATH}${realFileName}-${Date.now()}${extention}`;
+        var fileUploaded = await uploadFile(Buffer.from(base64Image, 'base64'), filePath);        
     }
 
     Recipes.update({
             Name: name,
             ContentText: contentText,
-            ImageUrl: filePath,
-            UploadedBy: 1,
-            IsDeleted: false
+            ...(base64Image && {ImageUrl: filePath}),
         },{
             where: {
                 Id: id
